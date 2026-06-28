@@ -1,0 +1,3 @@
+pip install psycopg2-binary
+pip install email-validator
+pip install email-validator

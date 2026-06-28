@@ -1,0 +1,1 @@
+from app.models.auth.user import User  # noqa: F401
