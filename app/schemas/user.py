@@ -1,6 +1,11 @@
-from pydantic import BaseModel, EmailStr
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
+# ----------------------------
+# Register Request
+# ----------------------------
 class UserRegister(BaseModel):
     first_name: str
     last_name: str | None = None
@@ -9,13 +14,36 @@ class UserRegister(BaseModel):
     password: str
 
 
-class UserResponse(BaseModel):
-    id: str
-    first_name: str
-    last_name: str | None
+# ----------------------------
+# Login Request
+# ----------------------------
+class UserLogin(BaseModel):
     email: EmailStr
-    phone: str | None
+    password: str
+
+
+# ----------------------------
+# User Response
+# ----------------------------
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    first_name: str
+    last_name: str | None = None
+    email: EmailStr
+    phone: str | None = None
+    profile_image_url: str | None = None
+    email_verified: bool
+    phone_verified: bool
     status: str
 
-    class Config:
-        from_attributes = True
+
+# ----------------------------
+# JWT Token Response
+# ----------------------------
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+    
