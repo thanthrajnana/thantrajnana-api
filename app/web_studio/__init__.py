@@ -1,0 +1,1 @@
+"""Web Scratch studio module."""

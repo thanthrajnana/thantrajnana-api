@@ -1,69 +1,60 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, get_current_user, hash_password, verify_password
-from app.db.database import SessionLocal
-from app.models.auth.user import User
-from app.schemas.user import TokenResponse, UserLogin, UserRegister, UserResponse
-
-router = APIRouter(prefix="/auth", tags=["Auth"])
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+from app.api.dependencies import get_current_user
+from app.core.security import create_access_token, hash_password, verify_password
+from app.db.database import get_db
+from app.models import User
+from app.schemas import TokenResponse, UserLogin, UserPublic, UserRegister
 
 
-@router.post("/register", response_model=UserResponse)
-def register_user(payload: UserRegister, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == payload.email).first()
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
-        )
 
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: UserRegister, db: Session = Depends(get_db)) -> TokenResponse:
+    email = payload.email.lower()
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(status_code=400, detail="Email is already registered")
+    if payload.phone and db.scalar(select(User).where(User.phone == payload.phone)):
+        raise HTTPException(status_code=400, detail="Phone number is already registered")
+    initials = (payload.first_name[:1] + (payload.last_name or "")[:1]).upper() or "TJ"
     user = User(
-        first_name=payload.first_name,
-        last_name=payload.last_name,
-        email=payload.email,
+        first_name=payload.first_name.strip(),
+        last_name=(payload.last_name or "").strip(),
+        email=email,
         phone=payload.phone,
         password_hash=hash_password(payload.password),
+        role="STUDENT",
+        avatar_initials=initials,
     )
-
     db.add(user)
     db.commit()
     db.refresh(user)
-
-    return user
+    token = create_access_token(subject=user.id, role=user.role, extra={"email": user.email})
+    return TokenResponse(access_token=token, user=UserPublic.model_validate(user))
 
 
 @router.post("/login", response_model=TokenResponse)
-def login_user(payload: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email).first()
-
-    if not user:
+def login(payload: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
+    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
-    if not verify_password(payload.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-
-    access_token = create_access_token(
-        data={
-            "sub": str(user.id),
-            "email": user.email,
-            "status": user.status,
-        }
+    token = create_access_token(
+        subject=user.id,
+        role=user.role,
+        extra={"email": user.email},
     )
+    return TokenResponse(access_token=token, user=UserPublic.model_validate(user))
 
-    return TokenResponse(access_token=access_token)
+
+@router.get("/me", response_model=UserPublic)
+def me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
